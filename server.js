@@ -1,6 +1,6 @@
-// Optional Node.js server for production use
-// Install: npm install express cors dotenv
-// Run: node server.js
+// Node.js server — proxies requests to Claude & Groq (keeps API keys off the browser)
+// Setup: npm install express cors dotenv
+// Run:   node server.js
 
 const express = require('express');
 const cors = require('cors');
@@ -9,60 +9,68 @@ const path = require('path');
 
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// API Routes
+// ─── Main chat route ────────────────────────────────────────────────────────
+
 app.post('/api/chat', async (req, res) => {
     try {
-        const { message, history, isComplex } = req.body;
-        
-        // Determine which API to call
-        if (isComplex) {
-            const response = await callGemini(message, history);
-            res.json({ response });
-        } else {
-            const response = await callGroq(message, history);
-            res.json({ response });
-        }
+        const { message, history = [], isComplex } = req.body;
+
+        const response = isComplex
+            ? await callClaude(message, history)
+            : await callGroq(message, history);
+
+        res.json({ response, model: isComplex ? 'Claude Sonnet 4' : 'Groq (Llama 3)' });
     } catch (error) {
+        console.error('API error:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
 
-// Gemini API Call
-async function callGemini(message, history) {
+// ─── Claude API ─────────────────────────────────────────────────────────────
+
+async function callClaude(message, history) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set in .env');
+
     const fetch = (await import('node-fetch')).default;
-    const apiKey = process.env.GEMINI_API_KEY;
-    
-    const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${apiKey}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [
-                    ...history,
-                    {
-                        role: 'user',
-                        parts: [{ text: message }]
-                    }
-                ]
-            })
-        }
-    );
-    
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 2048,
+            messages: [
+                ...history,
+                { role: 'user', content: message }
+            ]
+        })
+    });
+
     const data = await response.json();
-    return data.candidates[0].content.parts[0].text;
+
+    if (data.error) throw new Error(`Claude: ${data.error.message}`);
+    if (!data.content?.[0]?.text) throw new Error('Unexpected Claude response shape');
+
+    return data.content[0].text;
 }
 
-// Groq API Call
+// ─── Groq API ────────────────────────────────────────────────────────────────
+
 async function callGroq(message, history) {
-    const fetch = (await import('node-fetch')).default;
     const apiKey = process.env.GROQ_API_KEY;
-    
+    if (!apiKey) throw new Error('GROQ_API_KEY is not set in .env');
+
+    const fetch = (await import('node-fetch')).default;
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -70,7 +78,7 @@ async function callGroq(message, history) {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            model: 'mixtral-8x7b-32768',
+            model: 'llama-3.3-70b-versatile',
             messages: [
                 ...history,
                 { role: 'user', content: message }
@@ -79,19 +87,24 @@ async function callGroq(message, history) {
             max_tokens: 1024
         })
     });
-    
+
     const data = await response.json();
+
+    if (data.error) throw new Error(`Groq: ${data.error.message}`);
+    if (!data.choices?.[0]?.message?.content) throw new Error('Unexpected Groq response shape');
+
     return data.choices[0].message.content;
 }
 
-// Serve index.html for root
+// ─── Static fallback ─────────────────────────────────────────────────────────
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log('Routing: Complex queries → Gemini 2.5 Pro');
-    console.log('Routing: Simple queries → Groq (Fast)');
+    console.log(`\n🚀 Server running at http://localhost:${PORT}`);
+    console.log('   Complex queries  →  Claude Sonnet 4');
+    console.log('   Simple queries   →  Groq (Llama 3)\n');
 });
