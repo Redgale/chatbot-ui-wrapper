@@ -76,7 +76,7 @@
                         </button>
                         <button class="model-option" data-mode="claude">
                             <span class="opt-dot claude"></span>
-                            <div><strong>Claude Sonnet 4</strong><small>Always use Claude</small></div>
+                            <div><strong>Nemotron Nano 30B</strong><small>Always use Nemotron (OpenRouter)</small></div>
                         </button>
                         <button class="model-option" data-mode="groq">
                             <span class="opt-dot groq"></span>
@@ -91,7 +91,7 @@
             <div class="welcome" id="welcome">
                 <div class="welcome-glyph">+</div>
                 <h1>Chatbot UI</h1>
-                <p>Claude Sonnet 4 for complex queries &middot; Groq for fast replies</p>
+                <p>Nemotron 30B (free) for complex queries &middot; Groq for fast replies</p>
             </div>
         </div>
 
@@ -121,9 +121,9 @@
                 <label>API Keys</label>
                 <p class="setting-note">Keys live in your <code>.env</code> file on the server, never in the browser.</p>
                 <div class="key-row">
-                    <span class="key-label claude-label">Claude</span>
-                    <code>ANTHROPIC_API_KEY</code>
-                    <a href="https://console.anthropic.com" target="_blank" rel="noopener">Get key</a>
+                    <span class="key-label claude-label">Nemotron</span>
+                    <code>OPENROUTER_API_KEY</code>
+                    <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get key</a>
                 </div>
                 <div class="key-row">
                     <span class="key-label groq-label">Groq</span>
@@ -133,7 +133,7 @@
             </div>
             <div class="setting-group">
                 <label>Routing Logic</label>
-                <p class="setting-note">In <strong>Auto</strong> mode, messages containing keywords like <em>explain, debug, code, analyze</em> or longer than 100 characters route to Claude. Everything else goes to Groq for speed.</p>
+                <p class="setting-note">In <strong>Auto</strong> mode, messages containing keywords like <em>explain, debug, code, analyze</em> or longer than 100 characters route to Nemotron. Everything else goes to Groq for speed.</p>
             </div>
             <div class="setting-group">
                 <label>Danger Zone</label>
