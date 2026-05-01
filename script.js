@@ -34,6 +34,13 @@ const modalBackdrop   = document.getElementById('modalBackdrop');
 const closeModal      = document.getElementById('closeModal');
 const clearAllBtn     = document.getElementById('clearAllBtn');
 const inputWrap       = document.getElementById('inputWrap');
+const uploadBtn       = document.getElementById('uploadBtn');
+const fileInput       = document.getElementById('fileInput');
+const filePreviewBar  = document.getElementById('filePreviewBar');
+
+// ── Attached files state ──────────────────────────────────────────────────────
+// Each entry: { name, type, base64, previewUrl (images only) }
+let attachedFiles = [];
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
@@ -115,7 +122,7 @@ function startNewChat(saveFirst = true) {
     w.innerHTML = `
         <div class="welcome-glyph">+</div>
         <h1>Chatbot UI</h1>
-        <p>Claude Sonnet 4 for complex queries &middot; Groq for fast replies</p>`;
+        <p>Nemotron 30B (free) for complex queries &middot; Groq for fast replies</p>`;
     messages.appendChild(w);
 
     renderSessionsList();
@@ -240,7 +247,7 @@ function setModelMode(mode) {
         b.classList.toggle('active', b.dataset.mode === mode)
     );
 
-    const labels = { auto: 'Auto', claude: 'Claude Sonnet 4', groq: 'Groq Llama 3' };
+    const labels = { auto: 'Auto', claude: 'Nemotron 30B', groq: 'Groq Llama 3' };
     modelLabel.textContent = labels[mode];
     modelDot.className = 'model-dot ' + mode;
 }
@@ -276,6 +283,53 @@ messageInput.addEventListener('keydown', e => {
 
 sendBtn.addEventListener('click', sendMessage);
 
+// ── File upload ───────────────────────────────────────────────────────────────
+
+uploadBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', async () => {
+    const files = Array.from(fileInput.files);
+    fileInput.value = ''; // reset so same file can be re-added
+
+    for (const file of files) {
+        if (attachedFiles.length >= 5) {
+            alert('Maximum 5 files per message.'); break;
+        }
+        const base64 = await fileToBase64(file);
+        const previewUrl = file.type.startsWith('image/') ? `data:${file.type};base64,${base64}` : null;
+        attachedFiles.push({ name: file.name, type: file.type, base64, previewUrl });
+    }
+    renderFilePreview();
+});
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function renderFilePreview() {
+    filePreviewBar.innerHTML = '';
+    attachedFiles.forEach((f, i) => {
+        const chip = document.createElement('div');
+        chip.className = 'file-chip';
+        chip.innerHTML = `
+            ${f.previewUrl ? `<img src="${f.previewUrl}" alt="${escapeHtml(f.name)}">` : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'}
+            <span class="file-chip-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+            <button class="file-chip-remove" data-idx="${i}" title="Remove">✕</button>`;
+        filePreviewBar.appendChild(chip);
+    });
+    filePreviewBar.querySelectorAll('.file-chip-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+            attachedFiles.splice(Number(btn.dataset.idx), 1);
+            renderFilePreview();
+        });
+    });
+}
+
 // ── Send ──────────────────────────────────────────────────────────────────────
 
 const COMPLEX_KEYWORDS = [
@@ -299,21 +353,38 @@ function resolveIsComplex(msg) {
 
 async function sendMessage() {
     const text = messageInput.value.trim();
-    if (!text || isSending) return;
+    if (!text && attachedFiles.length === 0) return;
+    if (isSending) return;
+
+    // Files require Nemotron — Groq doesn't support attachments
+    const files = [...attachedFiles];
+    const hasFiles = files.length > 0;
+    const isComplex = hasFiles || resolveIsComplex(text || 'file');
+
+    if (hasFiles && modelMode === 'groq') {
+        alert('File attachments require Nemotron (OpenRouter). Switching for this message.');
+    }
 
     const historySent = [...chatHistory];
-    renderMessage(text, 'user', true);
+    const displayText = text || `[${files.map(f => f.name).join(', ')}]`;
+    renderMessage(displayText, 'user', true, files);
+
     messageInput.value = '';
     messageInput.style.height = 'auto';
+    attachedFiles = [];
+    renderFilePreview();
     setSending(true);
-
-    const isComplex = resolveIsComplex(text);
 
     try {
         const res  = await fetch('/api/chat', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ message: text, history: historySent, isComplex })
+            body:    JSON.stringify({
+                message: text,
+                history: historySent,
+                isComplex,
+                files: hasFiles ? files.map(f => ({ name: f.name, type: f.type, base64: f.base64 })) : []
+            })
         });
         const data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
@@ -330,7 +401,7 @@ async function sendMessage() {
 
 // ── Render message ────────────────────────────────────────────────────────────
 
-function renderMessage(content, role, animate) {
+function renderMessage(content, role, animate, files = []) {
     chatHistory.push({ role, content });
 
     // Remove welcome screen
@@ -346,7 +417,7 @@ function renderMessage(content, role, animate) {
         const dot = document.createElement('span');
         dot.className = `meta-dot ${lastUsedModel || ''}`;
         const name = document.createTextNode(
-            lastUsedModel === 'claude' ? 'Claude Sonnet 4' :
+            lastUsedModel === 'claude' ? 'Nemotron 30B' :
             lastUsedModel === 'groq'   ? 'Groq Llama 3' : 'Assistant'
         );
         meta.appendChild(dot);
@@ -360,6 +431,27 @@ function renderMessage(content, role, animate) {
 
     const rendered = renderMarkdownLite(content);
     bubble.innerHTML = rendered;
+
+    // Show image previews for user messages with attachments
+    if (role === 'user' && files.length > 0) {
+        const previewWrap = document.createElement('div');
+        previewWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;';
+        files.forEach(f => {
+            if (f.previewUrl) {
+                const img = document.createElement('img');
+                img.src = f.previewUrl;
+                img.style.cssText = 'max-width:120px;max-height:90px;border-radius:8px;object-fit:cover;';
+                previewWrap.appendChild(img);
+            } else {
+                const tag = document.createElement('span');
+                tag.style.cssText = 'font-size:11px;background:rgba(255,255,255,.15);padding:3px 8px;border-radius:6px;';
+                tag.textContent = f.name;
+                previewWrap.appendChild(tag);
+            }
+        });
+        bubble.insertBefore(previewWrap, bubble.firstChild);
+    }
+
     bubble.dataset.original = rendered; // store for search highlight
 
     row.appendChild(meta);
@@ -445,4 +537,4 @@ function timeAgo(ts) {
 setModelMode('auto');
 renderSessionsList();
 messageInput.focus();
-console.log('Chatbot UI ready | Auto: complex → Claude Sonnet 4, simple → Groq Llama 3');
+console.log('Chatbot UI ready | Auto: complex → Nemotron 30B, simple → Groq Llama 3');

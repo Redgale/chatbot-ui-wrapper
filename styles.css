@@ -9,7 +9,7 @@
     --text:        #f0f0f2;
     --text2:       #8a8a9a;
     --text3:       #5a5a6a;
-    --claude:      #c97e4e;
+    --nemotron:    #4eca8b;
     --groq:        #4ea8de;
     --accent:      #6c6cff;
     --danger:      #e05252;
@@ -27,7 +27,7 @@ button { font-family: var(--font); cursor: pointer; border: none; background: no
 input, textarea { font-family: var(--font); }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-code { font-family: var(--mono); font-size: 0.85em; background: var(--bg3); padding: 2px 5px; border-radius: 4px; color: var(--claude); }
+code { font-family: var(--mono); font-size: 0.85em; background: var(--bg3); padding: 2px 5px; border-radius: 4px; color: var(--nemotron); }
 
 /* ── Layout ──────────────────────────────────────────────── */
 .app {
@@ -307,7 +307,7 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--bg3); padd
     transition: background .2s;
 }
 .model-dot.auto   { background: var(--accent); }
-.model-dot.claude { background: var(--claude); }
+.model-dot.claude { background: var(--nemotron); }
 .model-dot.groq   { background: var(--groq); }
 
 .model-dropdown {
@@ -344,7 +344,7 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--bg3); padd
     width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
 }
 .opt-dot.auto   { background: var(--accent); }
-.opt-dot.claude { background: var(--claude); }
+.opt-dot.claude { background: var(--nemotron); }
 .opt-dot.groq   { background: var(--groq); }
 
 /* ── Messages ────────────────────────────────────────────── */
@@ -409,7 +409,7 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--bg3); padd
 .meta-dot {
     width: 6px; height: 6px; border-radius: 50%; background: var(--text3);
 }
-.meta-dot.claude { background: var(--claude); }
+.meta-dot.claude { background: var(--nemotron); }
 .meta-dot.groq   { background: var(--groq); }
 
 .msg-bubble {
@@ -577,7 +577,7 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--bg3); padd
     border-radius: 4px;
     flex-shrink: 0;
 }
-.claude-label { background: rgba(201,126,78,.15); color: var(--claude); }
+.claude-label { background: rgba(78,202,139,.15); color: var(--nemotron); }
 .groq-label   { background: rgba(78,168,222,.15); color: var(--groq); }
 .key-row code  { flex: 1; background: none; padding: 0; font-size: 12px; color: var(--text2); }
 .key-row a     { flex-shrink: 0; font-size: 12px; }
@@ -593,6 +593,59 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--bg3); padd
     align-self: flex-start;
 }
 .danger-btn:hover { background: rgba(224,82,82,.16); border-color: var(--danger); }
+
+/* ── File upload ─────────────────────────────────────────── */
+.upload-btn {
+    width: 34px; height: 34px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 9px;
+    color: var(--text3);
+    flex-shrink: 0;
+    transition: color .15s, background .15s;
+}
+.upload-btn:hover { color: var(--nemotron); background: rgba(78,202,139,.1); }
+.upload-btn svg { width: 18px; height: 18px; }
+.upload-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+.file-preview-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 16px 0;
+}
+.file-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--text2);
+    max-width: 200px;
+}
+.file-chip img {
+    width: 28px; height: 28px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+.file-chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+.file-chip-remove {
+    flex-shrink: 0;
+    color: var(--text3);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    transition: color .12s;
+}
+.file-chip-remove:hover { color: var(--danger); }
 
 /* ── Animations ──────────────────────────────────────────── */
 @keyframes fadeUp {

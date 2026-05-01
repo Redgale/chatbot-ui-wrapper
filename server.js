@@ -18,10 +18,10 @@ app.use(express.static(path.join(__dirname)));
 
 app.post('/api/chat', async (req, res) => {
     try {
-        const { message, history = [], isComplex } = req.body;
+        const { message, history = [], isComplex, files = [] } = req.body;
 
         const response = isComplex
-            ? await callNemotron(message, history)
+            ? await callNemotron(message, history, files)
             : await callGroq(message, history);
 
         res.json({ response, model: isComplex ? 'Nemotron (OpenRouter)' : 'Groq (Llama 3)' });
@@ -33,9 +33,35 @@ app.post('/api/chat', async (req, res) => {
 
 // ─── OpenRouter / NVIDIA Nemotron API ────────────────────────────────────────
 
-async function callNemotron(message, history) {
+async function callNemotron(message, history, files = []) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set in .env');
+
+    // Build the user content — plain text or multimodal array if files attached
+    let userContent;
+    if (files.length > 0) {
+        userContent = [];
+        // Add each file as an image_url block (works for images & PDFs via OpenRouter)
+        for (const f of files) {
+            if (f.type.startsWith('image/')) {
+                userContent.push({
+                    type: 'image_url',
+                    image_url: { url: `data:${f.type};base64,${f.base64}` }
+                });
+            } else if (f.type === 'application/pdf') {
+                // OpenRouter supports PDF as base64 image_url with pdf mime type
+                userContent.push({
+                    type: 'image_url',
+                    image_url: { url: `data:application/pdf;base64,${f.base64}` }
+                });
+            }
+        }
+        if (message) {
+            userContent.push({ type: 'text', text: message });
+        }
+    } else {
+        userContent = message;
+    }
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -45,7 +71,7 @@ async function callNemotron(message, history) {
         },
         body: JSON.stringify({
             model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-            messages: [...history, { role: 'user', content: message }],
+            messages: [...history, { role: 'user', content: userContent }],
             max_tokens: 2048
         })
     });
