@@ -1,163 +1,448 @@
-// ─── Routing config ──────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 
-const COMPLEX_KEYWORDS = [
-    'explain', 'analyze', 'analyse', 'research', 'code', 'algorithm',
-    'mathematics', 'physics', 'chemistry', 'biology', 'philosophy',
-    'debate', 'compare', 'contrast', 'reasoning', 'proof', 'complex',
-    'detailed', 'comprehensive', 'debug', 'fix', 'implement', 'design',
-    'architecture', 'write', 'summarize', 'summarise', 'review', 'evaluate'
-];
+let chatHistory      = [];          // [{role, content}] for current session
+let sessions         = [];          // [{id, title, messages, timestamp}]
+let currentSessionId = null;
+let modelMode        = 'auto';      // 'auto' | 'claude' | 'groq'
+let sidebarOpen      = true;
+let isSending        = false;
+let lastUsedModel    = null;        // 'claude' | 'groq'
+let searchQuery      = '';
 
-// ─── State ───────────────────────────────────────────────────────────────────
+// ── DOM refs ──────────────────────────────────────────────────────────────────
 
-let chatHistory = [];          // [{role, content}, ...]
-let activeModel  = 'Groq (Llama 3)';
+const app             = document.getElementById('app');
+const sidebar         = document.getElementById('sidebar');
+const sidebarToggle   = document.getElementById('sidebarToggle');
+const sidebarExpandTab= document.getElementById('sidebarExpandTab');
+const hamburger       = document.getElementById('hamburger');
+const newChatBtn      = document.getElementById('newChatBtn');
+const sessionsList    = document.getElementById('sessionsList');
+const searchInput     = document.getElementById('searchInput');
+const searchClear     = document.getElementById('searchClear');
+const exportBtn       = document.getElementById('exportBtn');
+const settingsBtn     = document.getElementById('settingsBtn');
+const messages        = document.getElementById('messages');
+const welcome         = document.getElementById('welcome');
+const messageInput    = document.getElementById('messageInput');
+const sendBtn         = document.getElementById('sendBtn');
+const modelBtn        = document.getElementById('modelBtn');
+const modelDropdown   = document.getElementById('modelDropdown');
+const modelDot        = document.getElementById('modelDot');
+const modelLabel      = document.getElementById('modelLabel');
+const modalBackdrop   = document.getElementById('modalBackdrop');
+const closeModal      = document.getElementById('closeModal');
+const clearAllBtn     = document.getElementById('clearAllBtn');
+const inputWrap       = document.getElementById('inputWrap');
 
-// ─── DOM refs ─────────────────────────────────────────────────────────────────
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 
-const messageInput      = document.getElementById('messageInput');
-const sendBtn           = document.getElementById('sendBtn');
-const chatMessages      = document.getElementById('chatMessages');
-const currentModelEl    = document.getElementById('currentModel');
-const newChatBtn        = document.querySelector('.new-chat-btn');
+function toggleSidebar() {
+    sidebarOpen = !sidebarOpen;
+    app.classList.toggle('sidebar-collapsed', !sidebarOpen);
+}
 
-// ─── Event listeners ─────────────────────────────────────────────────────────
+sidebarToggle.addEventListener('click', toggleSidebar);
+sidebarExpandTab.addEventListener('click', toggleSidebar);
+hamburger.addEventListener('click', toggleSidebar);
 
-sendBtn.addEventListener('click', sendMessage);
-messageInput.addEventListener('keypress', (e) => {
+// ── Sessions ──────────────────────────────────────────────────────────────────
+
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function saveCurrentToSessions() {
+    if (chatHistory.length === 0) return;
+
+    const title = chatHistory.find(m => m.role === 'user')?.content.slice(0, 48) || 'Chat';
+
+    if (currentSessionId) {
+        const idx = sessions.findIndex(s => s.id === currentSessionId);
+        if (idx !== -1) {
+            sessions[idx].messages = [...chatHistory];
+            sessions[idx].title    = title;
+            return;
+        }
+    }
+
+    const session = {
+        id:        generateId(),
+        title,
+        messages:  [...chatHistory],
+        timestamp: Date.now()
+    };
+    sessions.unshift(session);
+    currentSessionId = session.id;
+    renderSessionsList();
+}
+
+function loadSession(id) {
+    saveCurrentToSessions();
+    const session = sessions.find(s => s.id === id);
+    if (!session) return;
+
+    currentSessionId = id;
+    chatHistory      = [...session.messages];
+
+    // Re-render messages
+    messages.innerHTML = '';
+    chatHistory.forEach(m => renderMessage(m.content, m.role, false));
+
+    renderSessionsList();
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function deleteSession(id, e) {
+    e.stopPropagation();
+    sessions = sessions.filter(s => s.id !== id);
+    if (currentSessionId === id) {
+        startNewChat(false);
+    }
+    renderSessionsList();
+}
+
+function startNewChat(saveFirst = true) {
+    if (saveFirst) saveCurrentToSessions();
+    chatHistory      = [];
+    currentSessionId = null;
+    lastUsedModel    = null;
+
+    messages.innerHTML = '';
+    const w = document.createElement('div');
+    w.className = 'welcome';
+    w.id = 'welcome';
+    w.innerHTML = `
+        <div class="welcome-glyph">+</div>
+        <h1>Chatbot UI</h1>
+        <p>Claude Sonnet 4 for complex queries &middot; Groq for fast replies</p>`;
+    messages.appendChild(w);
+
+    renderSessionsList();
+    messageInput.focus();
+}
+
+function renderSessionsList() {
+    const q = searchQuery.toLowerCase();
+    const filtered = q
+        ? sessions.filter(s => s.title.toLowerCase().includes(q) ||
+            s.messages.some(m => m.content.toLowerCase().includes(q)))
+        : sessions;
+
+    if (filtered.length === 0) {
+        sessionsList.innerHTML = `<p class="empty-state">${q ? 'No matches.' : 'No chats yet.'}</p>`;
+        return;
+    }
+
+    sessionsList.innerHTML = filtered.map(s => {
+        const ago      = timeAgo(s.timestamp);
+        const titleHtml = q
+            ? s.title.replace(new RegExp(`(${escReg(q)})`, 'gi'), '<mark>$1</mark>')
+            : escapeHtml(s.title);
+        const active = s.id === currentSessionId ? ' active' : '';
+        return `
+        <div class="session-item${active}" data-id="${s.id}">
+            <span class="session-title" title="${escapeHtml(s.title)}">${titleHtml}</span>
+            <span class="session-time">${ago}</span>
+            <button class="session-delete" data-id="${s.id}" title="Delete">✕</button>
+        </div>`;
+    }).join('');
+
+    sessionsList.querySelectorAll('.session-item').forEach(el => {
+        el.addEventListener('click', () => loadSession(el.dataset.id));
+    });
+    sessionsList.querySelectorAll('.session-delete').forEach(btn => {
+        btn.addEventListener('click', e => deleteSession(btn.dataset.id, e));
+    });
+}
+
+newChatBtn.addEventListener('click', () => startNewChat(true));
+
+// ── Search ────────────────────────────────────────────────────────────────────
+
+searchInput.addEventListener('input', () => {
+    searchQuery = searchInput.value.trim();
+    const wrap  = searchInput.closest('.search-wrap');
+    wrap.classList.toggle('has-value', searchQuery.length > 0);
+    renderSessionsList();
+    highlightMessages(searchQuery);
+});
+
+searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    searchQuery = '';
+    searchInput.closest('.search-wrap').classList.remove('has-value');
+    renderSessionsList();
+    highlightMessages('');
+});
+
+function highlightMessages(q) {
+    document.querySelectorAll('.msg-bubble').forEach(el => {
+        // restore original text
+        const orig = el.dataset.original;
+        if (!orig) return;
+        if (!q) {
+            el.innerHTML = orig;
+        } else {
+            el.innerHTML = orig.replace(
+                new RegExp(`(${escReg(q)})`, 'gi'),
+                '<mark>$1</mark>'
+            );
+        }
+    });
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+
+exportBtn.addEventListener('click', () => {
+    if (chatHistory.length === 0) {
+        alert('Nothing to export yet — start a conversation first.');
+        return;
+    }
+
+    const title = chatHistory.find(m => m.role === 'user')?.content.slice(0, 40) || 'Chat';
+    const date  = new Date().toISOString().slice(0, 10);
+
+    const md = `# ${title}\n_Exported ${date}_\n\n` +
+        chatHistory.map(m =>
+            `**${m.role === 'user' ? 'You' : 'Assistant'}**\n\n${m.content}`
+        ).join('\n\n---\n\n');
+
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `chat-${date}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+// ── Model picker ──────────────────────────────────────────────────────────────
+
+modelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    modelDropdown.classList.toggle('open');
+});
+
+document.addEventListener('click', () => modelDropdown.classList.remove('open'));
+
+modelDropdown.querySelectorAll('.model-option').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        setModelMode(btn.dataset.mode);
+        modelDropdown.classList.remove('open');
+    });
+});
+
+function setModelMode(mode) {
+    modelMode = mode;
+    modelDropdown.querySelectorAll('.model-option').forEach(b =>
+        b.classList.toggle('active', b.dataset.mode === mode)
+    );
+
+    const labels = { auto: 'Auto', claude: 'Claude Sonnet 4', groq: 'Groq Llama 3' };
+    modelLabel.textContent = labels[mode];
+    modelDot.className = 'model-dot ' + mode;
+}
+
+// ── Settings modal ────────────────────────────────────────────────────────────
+
+settingsBtn.addEventListener('click', () => modalBackdrop.classList.add('open'));
+closeModal.addEventListener('click',  () => modalBackdrop.classList.remove('open'));
+modalBackdrop.addEventListener('click', e => {
+    if (e.target === modalBackdrop) modalBackdrop.classList.remove('open');
+});
+
+clearAllBtn.addEventListener('click', () => {
+    if (!confirm('Delete all saved sessions? This cannot be undone.')) return;
+    sessions = [];
+    startNewChat(false);
+    modalBackdrop.classList.remove('open');
+});
+
+// ── Input auto-resize ─────────────────────────────────────────────────────────
+
+messageInput.addEventListener('input', () => {
+    messageInput.style.height = 'auto';
+    messageInput.style.height = Math.min(messageInput.scrollHeight, 180) + 'px';
+});
+
+messageInput.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
     }
 });
-newChatBtn.addEventListener('click', clearChat);
 
-// ─── Core send logic ─────────────────────────────────────────────────────────
+sendBtn.addEventListener('click', sendMessage);
+
+// ── Send ──────────────────────────────────────────────────────────────────────
+
+const COMPLEX_KEYWORDS = [
+    'explain','analyze','analyse','research','code','algorithm','mathematics',
+    'physics','chemistry','biology','philosophy','debate','compare','contrast',
+    'reasoning','proof','complex','detailed','comprehensive','debug','fix',
+    'implement','design','architecture','write','summarize','summarise',
+    'review','evaluate','refactor','generate'
+];
+
+function analyzeComplexity(msg) {
+    const lower = msg.toLowerCase();
+    return COMPLEX_KEYWORDS.some(k => lower.includes(k)) || msg.length > 100;
+}
+
+function resolveIsComplex(msg) {
+    if (modelMode === 'claude') return true;
+    if (modelMode === 'groq')   return false;
+    return analyzeComplexity(msg);
+}
 
 async function sendMessage() {
-    const message = messageInput.value.trim();
-    if (!message || sendBtn.disabled) return;
+    const text = messageInput.value.trim();
+    if (!text || isSending) return;
 
-    // Snapshot history BEFORE appending the new user turn so the server
-    // doesn't see a duplicate (it appends `message` itself).
     const historySent = [...chatHistory];
-
-    addMessageToUI(message, 'user');
+    renderMessage(text, 'user', true);
     messageInput.value = '';
+    messageInput.style.height = 'auto';
     setSending(true);
 
-    const isComplex = analyzeComplexity(message);
+    const isComplex = resolveIsComplex(text);
 
     try {
-        const res = await fetch('/api/chat', {
-            method: 'POST',
+        const res  = await fetch('/api/chat', {
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, history: historySent, isComplex })
+            body:    JSON.stringify({ message: text, history: historySent, isComplex })
         });
-
         const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
 
-        if (!res.ok || data.error) {
-            throw new Error(data.error || `HTTP ${res.status}`);
-        }
-
-        // Update the model badge to what the server actually used
-        if (data.model) setModelDisplay(data.model);
-
-        addMessageToUI(data.response, 'assistant');
+        lastUsedModel = isComplex ? 'claude' : 'groq';
+        renderMessage(data.response, 'assistant', true);
+        saveCurrentToSessions();
     } catch (err) {
-        console.error('Chat error:', err);
-        addMessageToUI(`⚠️ Error: ${err.message}`, 'assistant');
+        renderMessage(`**Error:** ${err.message}`, 'assistant', true);
     } finally {
         setSending(false);
     }
 }
 
-// ─── Complexity heuristic ────────────────────────────────────────────────────
+// ── Render message ────────────────────────────────────────────────────────────
 
-function analyzeComplexity(message) {
-    const lower = message.toLowerCase();
-    const hasKeyword = COMPLEX_KEYWORDS.some(k => lower.includes(k));
-    const isLong     = message.length > 100;
-    return hasKeyword || isLong;
-}
-
-// ─── UI helpers ──────────────────────────────────────────────────────────────
-
-function addMessageToUI(content, role) {
+function renderMessage(content, role, animate) {
     chatHistory.push({ role, content });
 
-    // Remove welcome screen on first real exchange
-    if (chatHistory.length === 2) {
-        document.querySelector('.welcome-section')?.remove();
-        // Once messages start, let the container scroll normally
-        chatMessages.style.justifyContent = 'flex-start';
-    }
+    // Remove welcome screen
+    document.getElementById('welcome')?.remove();
 
-    const el = document.createElement('div');
-    el.className = `message ${role}`;
-    el.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
-    chatMessages.appendChild(el);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
+    const row = document.createElement('div');
+    row.className = `msg-row ${role}${animate ? '' : ''}`;
 
-function setSending(isSending) {
-    sendBtn.disabled   = isSending;
-    messageInput.disabled = isSending;
+    const meta    = document.createElement('div');
+    meta.className = 'msg-meta';
 
-    if (isSending) {
-        // Show a typing indicator
-        const indicator = document.createElement('div');
-        indicator.className = 'message assistant';
-        indicator.id = 'typingIndicator';
-        indicator.innerHTML = `<div class="message-content typing">
-            <span></span><span></span><span></span>
-        </div>`;
-        chatMessages.appendChild(indicator);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+    if (role === 'assistant') {
+        const dot = document.createElement('span');
+        dot.className = `meta-dot ${lastUsedModel || ''}`;
+        const name = document.createTextNode(
+            lastUsedModel === 'claude' ? 'Claude Sonnet 4' :
+            lastUsedModel === 'groq'   ? 'Groq Llama 3' : 'Assistant'
+        );
+        meta.appendChild(dot);
+        meta.appendChild(name);
     } else {
-        document.getElementById('typingIndicator')?.remove();
+        meta.textContent = 'You';
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-bubble';
+
+    const rendered = renderMarkdownLite(content);
+    bubble.innerHTML = rendered;
+    bubble.dataset.original = rendered; // store for search highlight
+
+    row.appendChild(meta);
+    row.appendChild(bubble);
+    messages.appendChild(row);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+// Lightweight markdown renderer
+function renderMarkdownLite(text) {
+    // Escape HTML first
+    let out = escapeHtml(text);
+
+    // Fenced code blocks
+    out = out.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+        `<pre><code>${code.trimEnd()}</code></pre>`
+    );
+
+    // Inline code
+    out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // Bold
+    out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // Italic
+    out = out.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Line breaks (outside pre blocks) — split by <pre> to avoid touching them
+    const parts = out.split(/(<pre>[\s\S]*?<\/pre>)/g);
+    out = parts.map((p, i) =>
+        i % 2 === 1 ? p : p.replace(/\n/g, '<br>')
+    ).join('');
+
+    return out;
+}
+
+// ── Typing indicator ──────────────────────────────────────────────────────────
+
+function setSending(state) {
+    isSending = state;
+    sendBtn.disabled = state;
+    messageInput.disabled = state;
+
+    if (state) {
+        const row = document.createElement('div');
+        row.className = 'typing-row';
+        row.id = 'typingRow';
+        row.innerHTML = `<div class="typing-dots"><span></span><span></span><span></span></div>`;
+        messages.appendChild(row);
+        messages.scrollTop = messages.scrollHeight;
+    } else {
+        document.getElementById('typingRow')?.remove();
+        messageInput.focus();
     }
 }
 
-function setModelDisplay(modelName) {
-    activeModel = modelName;
-    currentModelEl.textContent = modelName;
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
 
-function clearChat() {
-    chatHistory = [];
-    chatMessages.innerHTML = `
-        <div class="welcome-section">
-            <div class="welcome-icon">
-                <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M50 20C33.4 20 20 33.4 20 50S33.4 80 50 80S80 66.6 80 50S66.6 20 50 20M30 55L45 65L70 35"
-                          stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </div>
-            <h1 class="welcome-title">Chatbot UI</h1>
-        </div>`;
-    chatMessages.style.justifyContent = 'center';
-    setModelDisplay('Groq (Llama 3)');
+function escReg(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+function timeAgo(ts) {
+    const diff = Date.now() - ts;
+    const m = Math.floor(diff / 60000);
+    if (m < 1)  return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
 }
 
-// ─── Settings (no longer needed for keys — they live in .env) ────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 
-document.querySelector('.settings-btn')?.addEventListener('click', () => {
-    alert(
-        'API keys are configured in your .env file on the server.\n\n' +
-        'ANTHROPIC_API_KEY  →  Claude Sonnet 4 (complex queries)\n' +
-        'GROQ_API_KEY       →  Groq Llama 3 (fast queries)'
-    );
-});
-
-// ─── Init ────────────────────────────────────────────────────────────────────
-
-console.log('Chatbot UI ready.  Complex → Claude Sonnet 4  |  Simple → Groq Llama 3');
-setModelDisplay('Groq (Llama 3)');
+setModelMode('auto');
+renderSessionsList();
+messageInput.focus();
+console.log('Chatbot UI ready | Auto: complex → Claude Sonnet 4, simple → Groq Llama 3');
