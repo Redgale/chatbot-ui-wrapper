@@ -5,16 +5,16 @@ const API_CONFIG = {
         models: ['mixtral-8x7b-32768', 'llama2-70b-4096'],
         defaultModel: 'mixtral-8x7b-32768'
     },
-    gemini: {
-        endpoint: 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent',
-        models: ['gemini-2.5-pro', 'gemini-1.5-pro'],
-        defaultModel: 'gemini-2.5-pro'
+    claude: {
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        models: ['claude-3-5-sonnet-20241022'],
+        defaultModel: 'claude-3-5-sonnet-20241022'
     }
 };
 
 let chatHistory = [];
-let currentModel = 'gemini-2.5-pro';
-let useGemini = true;
+let currentModel = 'claude-3-5-sonnet-20241022';
+let useClaude = true;
 
 // DOM Elements
 const messageInput = document.getElementById('messageInput');
@@ -45,7 +45,7 @@ async function sendMessage() {
     
     // Determine which AI to use
     const isComplex = analyzeComplexity(message);
-    useGemini = isComplex;
+    useClaude = isComplex;
     updateModelDisplay();
     
     try {
@@ -64,7 +64,8 @@ function analyzeComplexity(message) {
     const complexKeywords = [
         'explain', 'analyze', 'research', 'code', 'algorithm', 'mathematics',
         'physics', 'chemistry', 'biology', 'philosophy', 'debate', 'compare',
-        'contrast', 'reasoning', 'proof', 'complex', 'detailed', 'comprehensive'
+        'contrast', 'reasoning', 'proof', 'complex', 'detailed', 'comprehensive',
+        'debug', 'fix', 'implement', 'design', 'architecture'
     ];
     
     const lowerMessage = message.toLowerCase();
@@ -76,8 +77,8 @@ function analyzeComplexity(message) {
 
 // Get response from appropriate AI
 async function getAIResponse(message) {
-    if (useGemini) {
-        return getGeminiResponse(message);
+    if (useClaude) {
+        return getClaudeResponse(message);
     } else {
         return getGroqResponse(message);
     }
@@ -120,45 +121,40 @@ async function getGroqResponse(message) {
     }
 }
 
-// Gemini API Call (Complex responses)
-async function getGeminiResponse(message) {
-    const apiKey = localStorage.getItem('gemini_api_key');
+// Claude API Call (Complex responses)
+async function getClaudeResponse(message) {
+    const apiKey = localStorage.getItem('claude_api_key');
     if (!apiKey) {
-        return 'Please set your Gemini API key in settings.';
+        return 'Please set your Claude API key in settings.';
     }
 
     try {
-        const response = await fetch(
-            `${API_CONFIG.gemini.endpoint}?key=${apiKey}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    contents: [
-                        ...chatHistory.map(msg => ({
-                            role: msg.role === 'user' ? 'user' : 'model',
-                            parts: [{ text: msg.content }]
-                        })),
-                        {
-                            role: 'user',
-                            parts: [{ text: message }]
-                        }
-                    ]
-                })
-            }
-        );
+        const response = await fetch(API_CONFIG.claude.endpoint, {
+            method: 'POST',
+            headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: API_CONFIG.claude.defaultModel,
+                max_tokens: 2048,
+                messages: [
+                    ...chatHistory,
+                    { role: 'user', content: message }
+                ]
+            })
+        });
 
         const data = await response.json();
         
-        if (data.candidates && data.candidates[0]) {
-            return data.candidates[0].content.parts[0].text;
+        if (data.content && data.content[0]) {
+            return data.content[0].text;
         }
         return 'No response received';
     } catch (error) {
-        console.error('Gemini Error:', error);
-        return 'Error calling Gemini API';
+        console.error('Claude Error:', error);
+        return 'Error calling Claude API';
     }
 }
 
@@ -184,7 +180,7 @@ function addMessageToUI(content, role) {
 
 // Update model display
 function updateModelDisplay() {
-    currentModel = useGemini ? 'Gemini 2.5 Pro' : 'Groq (Mixtral)';
+    currentModel = useClaude ? 'Claude 3.5 Sonnet' : 'Groq (Mixtral)';
     currentModelDisplay.textContent = currentModel;
 }
 
@@ -214,17 +210,17 @@ function escapeHtml(text) {
 document.querySelector('.settings-btn')?.addEventListener('click', openSettings);
 
 function openSettings() {
-    const geminiKey = prompt('Enter your Gemini API key:');
-    if (geminiKey) {
-        localStorage.setItem('gemini_api_key', geminiKey);
+    const claudeKey = prompt('Enter your Claude API key (from console.anthropic.com):');
+    if (claudeKey) {
+        localStorage.setItem('claude_api_key', claudeKey);
     }
     
-    const groqKey = prompt('Enter your Groq API key:');
+    const groqKey = prompt('Enter your Groq API key (from console.groq.com):');
     if (groqKey) {
         localStorage.setItem('groq_api_key', groqKey);
     }
 }
 
 // Initialize
-console.log('Chatbot UI loaded. Routing: Complex → Gemini 2.5 Pro | Fast → Groq');
+console.log('Chatbot UI loaded. Routing: Complex → Claude 3.5 Sonnet | Fast → Groq');
 updateModelDisplay();
