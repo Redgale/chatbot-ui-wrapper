@@ -10,8 +10,18 @@ const path = require('path');
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+// ─── CORS — allow any origin ──────────────────────────────────────────────────
+const corsOptions = {
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // pre-flight for all routes
+
+// Raise body limit to 50 mb to handle base64-encoded image payloads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname)));
 
 // ─── Main chat route ─────────────────────────────────────────────────────────
@@ -76,7 +86,10 @@ async function callNemotron(message, history, files = []) {
         })
     });
 
-    const data = await response.json();
+    const rawText = await response.text();
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch { throw new Error(`Nemotron returned non-JSON (status ${response.status}): ${rawText.slice(0, 200)}`); }
     if (data.error) throw new Error(`Nemotron: ${data.error.message}`);
     if (!data.choices?.[0]?.message?.content) throw new Error('Unexpected Nemotron response shape');
     return data.choices[0].message.content;
@@ -102,11 +115,23 @@ async function callGroq(message, history) {
         })
     });
 
-    const data = await response.json();
+    const rawText = await response.text();
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch { throw new Error(`Groq returned non-JSON (status ${response.status}): ${rawText.slice(0, 200)}`); }
     if (data.error) throw new Error(`Groq: ${data.error.message}`);
     if (!data.choices?.[0]?.message?.content) throw new Error('Unexpected Groq response shape');
     return data.choices[0].message.content;
 }
+
+// ─── Payload error handler (catches Express body-parser rejections) ───────────
+app.use((err, req, res, next) => {
+    if (err.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'Payload too large — try a smaller image or PDF.' });
+    }
+    console.error('Unhandled middleware error:', err.message);
+    res.status(500).json({ error: err.message });
+});
 
 // ─── Fallback ─────────────────────────────────────────────────────────────────
 

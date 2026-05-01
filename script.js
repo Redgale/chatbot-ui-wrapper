@@ -386,7 +386,10 @@ async function sendMessage() {
                 files: hasFiles ? files.map(f => ({ name: f.name, type: f.type, base64: f.base64 })) : []
             })
         });
-        const data = await res.json();
+        let data;
+        const rawText = await res.text();
+        try { data = JSON.parse(rawText); }
+        catch { throw new Error(`Server error (${res.status}): ${rawText.slice(0, 300)}`); }
         if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
 
         lastUsedModel = isComplex ? 'claude' : 'groq';
